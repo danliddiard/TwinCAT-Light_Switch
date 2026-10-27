@@ -259,3 +259,14 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc
+# TwinCAT
+_Boot/
+_CompileInfo/
+_Libraries/
+_Deployment/
+*.~u
+*.tclrs
+*.suo
+*.user
+.vs/
+*.bak

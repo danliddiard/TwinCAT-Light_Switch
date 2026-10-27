@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="MAIN" Id="{f5350466-b198-4d8c-9e40-5bb2dc1b6287}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+	Switch AT %I* :BOOL;
+	LIGHT AT %Q* : BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[Light := Switch;
+
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
