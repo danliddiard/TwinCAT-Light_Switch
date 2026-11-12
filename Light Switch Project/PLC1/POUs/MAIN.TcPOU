@@ -9,8 +9,14 @@ END_VAR
 ]]></Declaration>
     <Implementation>
       <ST><![CDATA[Light := Switch;
-
+   P_FanTest();
+   
 ]]></ST>
     </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="3" Count="1" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
   </POU>
 </TcPlcObject>

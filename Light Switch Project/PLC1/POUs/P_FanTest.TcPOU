@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="P_FanTest" Id="{ce1d3c51-6244-41e4-a14c-9424d934c10f}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_FanTest
+// EL7342 channel 1 as a 0-10 V source for the trainer's Fan Ctrl input.
+// Wiring: 1' -> 15 kohm -> Analog + Fan Ctrl, 5' -> Analog - Fan Ctrl,
+// 1 uF across Fan Ctrl (arrow end on -), 3' = +24 V via 1 A fuse, 7' = 0 V.
+// EL7342 Startup: 8022:01 = 1 (Velocity direct), 8020:03 = 24000.
+VAR CONSTANT
+    MODE_OFF      : INT := 0;
+    MODE_MANUAL   : INT := 1;
+    MODE_STEPS    : INT := 2;
+    MODE_RAMP     : INT := 3;
+    VELOCITY_FULL : REAL := 32767.0;
+END_VAR
+VAR
+    // ---- Operator: write these online ----
+    nMode       : INT := 0;          // 0 Off, 1 Manual, 2 Step test, 3 Ramp
+    rManualPct  : REAL := 0.0;       // Manual command, 0 to 100 %
+    bReset      : BOOL;              // Set TRUE to clear an EL7342 error
+    tStepHold   : TIME := T#15S;     // Time at each step, long enough to read the meter
+    tRampTime   : TIME := T#60S;     // 0 to 100 % ramp time, for Scope
+
+    // ---- Filter values, for the expected voltage ----
+    rSupplyV    : REAL := 24.0;      // Measured SITOP voltage
+    rSeriesOhm  : REAL := 15000.0;   // Series resistor
+    rLoadOhm    : REAL := 8900.0;    // 8900 = trainer input, 10000 = bench stand-in
+
+    // ---- Readouts ----
+    rCmdPct     : REAL;              // Command actually sent, 0 to 100 %
+    rExpectedV  : REAL;              // What the meter should read across Fan Ctrl
+    nStep       : INT;               // Step test position, 0 to 4
+    bStepsDone  : BOOL;
+    bFanActive  : BOOL;              // Enabled and the terminal reports Ready
+
+    // ---- EL7342 channel 1 (link each one) ----
+    bStsReadyToEnable AT %I* : BOOL; // DCM Status Channel 1 > Status > Ready to enable
+    bStsReady         AT %I* : BOOL; // DCM Status Channel 1 > Status > Ready
+    bStsWarning       AT %I* : BOOL; // DCM Status Channel 1 > Status > Warning
+    bStsError         AT %I* : BOOL; // DCM Status Channel 1 > Status > Error
+    bCtrlEnable       AT %Q* : BOOL; // DCM Control Channel 1 > Control > Enable
+    bCtrlReset        AT %Q* : BOOL; // DCM Control Channel 1 > Control > Reset
+    nVelocity         AT %Q* : INT;  // DCM Velocity Channel 1 > Velocity
+
+    // ---- Internal ----
+    aStepPct     : ARRAY[0..4] OF REAL := [0.0, 25.0, 50.0, 75.0, 100.0];
+    rTargetPct   : REAL;
+    nLastMode    : INT;
+    fbStepTimer  : TON;
+    fbRampTimer  : TON;
+    fbResetEdge  : R_TRIG;
+    fbResetPulse : TP;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 1. Reset: a rising edge gives a 200 ms pulse on the EL7342 Reset bit
+fbResetEdge(CLK := bReset);
+fbResetPulse(IN := fbResetEdge.Q, PT := T#200MS);
+bCtrlReset := fbResetPulse.Q;
+IF fbResetPulse.Q THEN
+    bReset := FALSE;
+END_IF
+
+// 2. A mode change restarts the step test and the ramp
+IF nMode <> nLastMode THEN
+    nStep := 0;
+    bStepsDone := FALSE;
+    fbStepTimer(IN := FALSE);
+    fbRampTimer(IN := FALSE);
+    nLastMode := nMode;
+END_IF
+
+// 3. Target for the active mode
+CASE nMode OF
+MODE_MANUAL:
+    rTargetPct := rManualPct;
+
+MODE_STEPS:
+    IF NOT bStepsDone THEN
+        rTargetPct := aStepPct[nStep];
+        fbStepTimer(IN := TRUE, PT := tStepHold);
+        IF fbStepTimer.Q THEN
+            fbStepTimer(IN := FALSE);
+            IF nStep < 4 THEN
+                nStep := nStep + 1;
+            ELSE
+                bStepsDone := TRUE;
+            END_IF
+        END_IF
+    ELSE
+        rTargetPct := 0.0;
+    END_IF
+
+MODE_RAMP:
+    fbRampTimer(IN := TRUE, PT := tRampTime);
+    IF tRampTime > T#0S THEN
+        rTargetPct := TIME_TO_REAL(fbRampTimer.ET) / TIME_TO_REAL(tRampTime) * 100.0;
+    ELSE
+        rTargetPct := 0.0;
+    END_IF
+
+ELSE
+    rTargetPct := 0.0;
+END_CASE
+
+// 4. Clamp: never negative (a negative value reverses the H-bridge), never over 100
+rCmdPct := LIMIT(0.0, rTargetPct, 100.0);
+
+// 5. Enable only in an active mode with no terminal error
+bCtrlEnable := (nMode <> MODE_OFF) AND NOT bStsError;
+bFanActive := bCtrlEnable AND bStsReady;
+
+// 6. Command to the terminal: 0 to 100 % becomes 0 to 32767
+IF NOT bCtrlEnable THEN
+    rCmdPct := 0.0;
+END_IF
+nVelocity := REAL_TO_INT(rCmdPct / 100.0 * VELOCITY_FULL);
+
+// 7. What the meter should read across Fan Ctrl + and -
+IF (rSeriesOhm + rLoadOhm) > 0.0 THEN
+    rExpectedV := rCmdPct / 100.0 * rSupplyV * rLoadOhm / (rSeriesOhm + rLoadOhm);
+ELSE
+    rExpectedV := 0.0;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
