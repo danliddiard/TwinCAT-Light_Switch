@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="P_Panel" Id="{b07705da-cd36-442c-9555-658a2efb01ed}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_Panel
+// Stage 1 operator panel for the ball-in-tube trainer.
+// Buttons on EL1008 Ch1-6, lamps on EL2008 Ch1-6, damper on EL2008 Ch7-8.
+// Fan runs through P_FanTest (manual mode). Call order in MAIN: P_Panel(); then P_FanTest();
+VAR CONSTANT
+    ST_DISABLED : INT := 0;
+    ST_HOMING   : INT := 1;
+    ST_READY    : INT := 2;
+    ST_ESTOP    : INT := 3;
+    ST_FAULT    : INT := 4;
+    DIR_NONE    : INT := 0;
+    DIR_OPEN    : INT := 1;
+    DIR_CLOSE   : INT := 2;
+END_VAR
+VAR
+    // ---- Settings (change online or here) ----
+    bPanelOwnsFan  : BOOL := TRUE;    // FALSE = hands the fan back to P_FanTest step tests
+    rFanStepPct    : REAL := 10.0;    // Fan change per button press, %
+    rStrokeOpenS   : REAL := 7.0;     // Damper full stroke, closed to open, seconds
+    rStrokeCloseS  : REAL := 7.0;     // Damper full stroke, open to closed, seconds
+    tHomeExtra     : TIME := T#3S;    // Extra drive time past full stroke when homing
+    tReverseDelay  : TIME := T#1S;    // Off time required before reversing the damper
+    rCycleS        : REAL := 0.01;    // PlcTask cycle time in seconds (10 ms)
+
+    // ---- Readouts (for the HMI later) ----
+    nState         : INT;             // 0 Disabled, 1 Homing, 2 Ready, 3 E-stop, 4 Fault
+    sState         : STRING(20) := 'DISABLED';
+    rFanPct        : REAL;            // Fan command, 0 to 100 %
+    rDamperPct     : REAL;            // Damper position estimate, 0 closed to 100 open
+    bHomed         : BOOL;
+    bEStopLatched  : BOOL;
+    bFanFault      : BOOL;
+    bLampTest      : BOOL;
+
+    // ---- Inputs, EL1008 (link each one) ----
+    diEnable       AT %I* : BOOL;     // Ch1  Selector switch, maintained
+    diFanUp        AT %I* : BOOL;     // Ch2  Red square
+    diFanDown      AT %I* : BOOL;     // Ch3  Green square
+    diDamperOpen   AT %I* : BOOL;     // Ch4  White square, hold to open
+    diDamperClose  AT %I* : BOOL;     // Ch5  Black square, hold to close
+    diEStop        AT %I* : BOOL;     // Ch6  Round red, software E-stop (NO contact)
+
+    // ---- Outputs, EL2008 (link each one) ----
+    doLampTopRed    AT %Q* : BOOL;    // Ch1  E-stop steady, fault blink
+    doLampWhite     AT %Q* : BOOL;    // Ch2  Enabled
+    doLampBlue      AT %Q* : BOOL;    // Ch3  Homing (blink)
+    doLampGreen     AT %Q* : BOOL;    // Ch4  Fan running
+    doLampAmber     AT %Q* : BOOL;    // Ch5  Damper moving (blink)
+    doLampBottomRed AT %Q* : BOOL;    // Ch6  Fan stopped
+    doDamperOpen    AT %Q* : BOOL;    // Ch7  Trainer Damper Open +
+    doDamperClose   AT %Q* : BOOL;    // Ch8  Trainer Damper Close +
+
+    // ---- Internal ----
+    bFirstScan      : BOOL := TRUE;
+    bDamperOpenOut  : BOOL;
+    bDamperCloseOut : BOOL;
+    bCmdOpen        : BOOL;
+    bCmdClose       : BOOL;
+    nLastDir        : INT;
+    bBlink          : BOOL;
+    fbFanUpEdge     : R_TRIG;
+    fbFanDownEdge   : R_TRIG;
+    fbHomeTimer     : TON;
+    fbOffTimer      : TON;
+    fbLampTestTimer : TON;
+    fbBlinkTimer    : TON;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Five sections, run in order every scan (like JSRs to routines)
+A1_Inputs();
+A2_Initialize();
+A3_Safety();
+A4_Main();
+A5_Outputs();
+]]></ST>
+    </Implementation>
+    <Action Name="A1_Inputs" Id="{ec4dd3e7-c21c-4a79-aec0-1360f3e345ed}">
+      <Implementation>
+        <ST><![CDATA[// ---- A1 Inputs: edges, lamp test, blink clock ----
+fbFanUpEdge(CLK := diFanUp);
+fbFanDownEdge(CLK := diFanDown);
+
+// Lamp test: hold Fan Up and Fan Down together for 2 s while disabled
+fbLampTestTimer(IN := diFanUp AND diFanDown AND (nState = ST_DISABLED), PT := T#2S);
+bLampTest := fbLampTestTimer.Q;
+
+// Blink clock: toggles every 0.5 s
+fbBlinkTimer(IN := NOT fbBlinkTimer.Q, PT := T#500MS);
+IF fbBlinkTimer.Q THEN
+    bBlink := NOT bBlink;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A2_Initialize" Id="{a12cbb05-67c5-4a55-96c4-1c6f28e6114a}">
+      <Implementation>
+        <ST><![CDATA[// ---- A2 Initialize: first scan only ----
+IF bFirstScan THEN
+    nState := ST_DISABLED;
+    rFanPct := 0.0;
+    bHomed := FALSE;
+    bEStopLatched := FALSE;
+    nLastDir := DIR_NONE;
+    bFirstScan := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A3_Safety" Id="{1e161565-210e-47d0-943c-1b90001b7454}">
+      <Implementation>
+        <ST><![CDATA[// ---- A3 Safety: E-stop latch, fan fault, state overrides ----
+// Software E-stop latches. Reset: release it, then turn Enable off (and back on).
+IF diEStop THEN
+    bEStopLatched := TRUE;
+ELSIF NOT diEnable THEN
+    bEStopLatched := FALSE;
+END_IF
+
+// EL7342 error. Turning Enable off sends a reset to the terminal.
+bFanFault := P_FanTest.bStsError;
+IF bFanFault AND NOT diEnable THEN
+    P_FanTest.bReset := TRUE;
+END_IF
+
+// Overrides, highest priority first
+IF bEStopLatched THEN
+    nState := ST_ESTOP;
+ELSIF bFanFault THEN
+    nState := ST_FAULT;
+ELSIF NOT diEnable THEN
+    nState := ST_DISABLED;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A4_Main" Id="{7d3595b4-b564-4903-94b5-41d8f5b793ec}">
+      <Implementation>
+        <ST><![CDATA[// ---- A4 Main: state machine, fan, damper ----
+CASE nState OF
+ST_DISABLED:
+    rFanPct := 0.0;
+    bHomed := FALSE;
+    bCmdOpen := FALSE;
+    bCmdClose := FALSE;
+    fbHomeTimer(IN := FALSE);
+    IF diEnable AND NOT bEStopLatched AND NOT bFanFault THEN
+        nState := ST_HOMING;
+    END_IF
+
+ST_HOMING:
+    // Drive the damper fully open, then call it 100 %
+    rFanPct := 0.0;
+    bCmdOpen := TRUE;
+    bCmdClose := FALSE;
+    fbHomeTimer(IN := TRUE, PT := REAL_TO_TIME(rStrokeOpenS * 1000.0) + tHomeExtra);
+    IF fbHomeTimer.Q THEN
+        fbHomeTimer(IN := FALSE);
+        rDamperPct := 100.0;
+        bHomed := TRUE;
+        bCmdOpen := FALSE;
+        nState := ST_READY;
+    END_IF
+
+ST_READY:
+    // Fan: one step per press
+    IF fbFanUpEdge.Q THEN
+        rFanPct := MIN(100.0, rFanPct + rFanStepPct);
+    END_IF
+    IF fbFanDownEdge.Q THEN
+        rFanPct := MAX(0.0, rFanPct - rFanStepPct);
+    END_IF
+    // Damper: moves only while a button is held
+    bCmdOpen := diDamperOpen AND NOT diDamperClose;
+    bCmdClose := diDamperClose AND NOT diDamperOpen;
+
+ST_ESTOP, ST_FAULT:
+    rFanPct := 0.0;
+    bCmdOpen := FALSE;
+    bCmdClose := FALSE;
+    bHomed := FALSE;
+    fbHomeTimer(IN := FALSE);
+END_CASE
+
+// Damper interlock: never both, and 1 s off before reversing
+fbOffTimer(IN := NOT (bDamperOpenOut OR bDamperCloseOut), PT := tReverseDelay);
+IF bCmdOpen AND ((nLastDir <> DIR_CLOSE) OR fbOffTimer.Q) THEN
+    bDamperOpenOut := TRUE;
+    bDamperCloseOut := FALSE;
+    nLastDir := DIR_OPEN;
+ELSIF bCmdClose AND ((nLastDir <> DIR_OPEN) OR fbOffTimer.Q) THEN
+    bDamperOpenOut := FALSE;
+    bDamperCloseOut := TRUE;
+    nLastDir := DIR_CLOSE;
+ELSE
+    bDamperOpenOut := FALSE;
+    bDamperCloseOut := FALSE;
+END_IF
+
+// Damper position estimate by run time
+IF bDamperOpenOut THEN
+    rDamperPct := rDamperPct + 100.0 * rCycleS / MAX(rStrokeOpenS, 0.1);
+ELSIF bDamperCloseOut THEN
+    rDamperPct := rDamperPct - 100.0 * rCycleS / MAX(rStrokeCloseS, 0.1);
+END_IF
+rDamperPct := LIMIT(0.0, rDamperPct, 100.0);
+
+// Fan command goes through P_FanTest (1 = Manual, 0 = Off)
+IF bPanelOwnsFan THEN
+    IF nState = ST_READY THEN
+        P_FanTest.nMode := 1;
+    ELSE
+        P_FanTest.nMode := 0;
+    END_IF
+    P_FanTest.rManualPct := rFanPct;
+END_IF
+
+// State text for the HMI
+CASE nState OF
+ST_DISABLED: sState := 'DISABLED';
+ST_HOMING:   sState := 'HOMING';
+ST_READY:    sState := 'READY';
+ST_ESTOP:    sState := 'E-STOP';
+ST_FAULT:    sState := 'FAULT';
+END_CASE
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A5_Outputs" Id="{cfa4f890-d5f4-4dcb-ae7c-96f648c64b8c}">
+      <Implementation>
+        <ST><![CDATA[// ---- A5 Outputs: lamps and damper ----
+IF bLampTest THEN
+    doLampTopRed := TRUE;
+    doLampWhite := TRUE;
+    doLampBlue := TRUE;
+    doLampGreen := TRUE;
+    doLampAmber := TRUE;
+    doLampBottomRed := TRUE;
+ELSE
+    doLampTopRed := (nState = ST_ESTOP) OR ((nState = ST_FAULT) AND bBlink);
+    doLampWhite := diEnable;
+    doLampBlue := (nState = ST_HOMING) AND bBlink;
+    doLampGreen := (nState = ST_READY) AND (rFanPct > 0.0);
+    doLampAmber := (bDamperOpenOut OR bDamperCloseOut) AND bBlink;
+    doLampBottomRed := NOT doLampGreen;
+END_IF
+
+doDamperOpen := bDamperOpenOut;
+doDamperClose := bDamperCloseOut AND NOT bDamperOpenOut;
+]]></ST>
+      </Implementation>
+    </Action>
+  </POU>
+</TcPlcObject>

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="P_FanTest" Id="{ce1d3c51-6244-41e4-a14c-9424d934c10f}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM P_FanTest
@@ -13,11 +13,14 @@ VAR CONSTANT
     MODE_RAMP     : INT := 3;
     VELOCITY_FULL : REAL := 32767.0;
 END_VAR
-VAR
-    // ---- Operator: write these online ----
+VAR_INPUT 
+    // ---- Operator: write these online, or P_Panel sets them ----
     nMode       : INT := 0;          // 0 Off, 1 Manual, 2 Step test, 3 Ramp
     rManualPct  : REAL := 0.0;       // Manual command, 0 to 100 %
     bReset      : BOOL;              // Set TRUE to clear an EL7342 error
+END_VAR
+	
+VAR
     tStepHold   : TIME := T#15S;     // Time at each step, long enough to read the meter
     tRampTime   : TIME := T#60S;     // 0 to 100 % ramp time, for Scope
 
@@ -124,5 +127,9 @@ ELSE
 END_IF
 ]]></ST>
     </Implementation>
+    <LineIds Name="P_FanTest">
+      <LineId Id="3" Count="68" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
   </POU>
 </TcPlcObject>

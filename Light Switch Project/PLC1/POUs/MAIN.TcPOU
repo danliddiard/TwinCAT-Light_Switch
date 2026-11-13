@@ -3,19 +3,17 @@
   <POU Name="MAIN" Id="{f5350466-b198-4d8c-9e40-5bb2dc1b6287}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM MAIN
 VAR
-	Switch AT %I* :BOOL;
-	LIGHT AT %Q* : BOOL;
 END_VAR
 ]]></Declaration>
     <Implementation>
-      <ST><![CDATA[Light := Switch;
-   P_FanTest();
-   
+      <ST><![CDATA[P_Panel();
+P_FanTest();
+
 ]]></ST>
     </Implementation>
     <LineIds Name="MAIN">
-      <LineId Id="3" Count="1" />
-      <LineId Id="10" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="11" Count="1" />
       <LineId Id="2" Count="0" />
     </LineIds>
   </POU>

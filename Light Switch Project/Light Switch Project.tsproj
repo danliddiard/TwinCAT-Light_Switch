@@ -82,13 +82,39 @@
 		</System>
 		<Plc>
 			<Project GUID="{32A162D7-6945-41A5-9369-A3CDDA81D06F}" Name="PLC1" PrjFilePath="PLC1\PLC1.plcproj" TmcFilePath="PLC1\PLC1.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{8CCDDBCC-AB17-9220-18E2-3D7510A38844}">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{34557324-03E8-C548-3EA5-EB864420B898}">
 					<Name>PLC1 Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="1">
 						<Name>PlcTask Inputs</Name>
 						<Var>
-							<Name>MAIN.Switch</Name>
+							<Name>P_Panel.diEnable</Name>
+							<Comment><![CDATA[ Ch1  Selector switch, maintained]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.diFanUp</Name>
+							<Comment><![CDATA[ Ch2  Red square]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.diFanDown</Name>
+							<Comment><![CDATA[ Ch3  Green square]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.diDamperOpen</Name>
+							<Comment><![CDATA[ Ch4  White square, hold to open]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.diDamperClose</Name>
+							<Comment><![CDATA[ Ch5  Black square, hold to close]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.diEStop</Name>
+							<Comment><![CDATA[ Ch6  Round red, software E-stop (NO contact)]]></Comment>
 							<Type>BOOL</Type>
 						</Var>
 						<Var>
@@ -115,7 +141,43 @@
 					<Vars VarGrpType="2" AreaNo="1">
 						<Name>PlcTask Outputs</Name>
 						<Var>
-							<Name>MAIN.LIGHT</Name>
+							<Name>P_Panel.doLampTopRed</Name>
+							<Comment><![CDATA[ Ch1  E-stop steady, fault blink]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doLampWhite</Name>
+							<Comment><![CDATA[ Ch2  Enabled]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doLampBlue</Name>
+							<Comment><![CDATA[ Ch3  Homing (blink)]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doLampGreen</Name>
+							<Comment><![CDATA[ Ch4  Fan running]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doLampAmber</Name>
+							<Comment><![CDATA[ Ch5  Damper moving (blink)]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doLampBottomRed</Name>
+							<Comment><![CDATA[ Ch6  Fan stopped]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doDamperOpen</Name>
+							<Comment><![CDATA[ Ch7  Trainer Damper Open +]]></Comment>
+							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.doDamperClose</Name>
+							<Comment><![CDATA[ Ch8  Trainer Damper Close +]]></Comment>
 							<Type>BOOL</Type>
 						</Var>
 						<Var>
@@ -1049,10 +1111,22 @@
 		<MappingInfo Identifier="{00000000-2001-0850-0020-500810000403}" Id="#x02030010"/>
 		<OwnerA Name="TIPC^PLC1^PLC1 Instance">
 			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 1 (EK1100)^Term 2 (EL1008)">
-				<Link VarA="PlcTask Inputs^MAIN.Switch" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^P_Panel.diDamperClose" VarB="Channel 5^Input"/>
+				<Link VarA="PlcTask Inputs^P_Panel.diDamperOpen" VarB="Channel 4^Input"/>
+				<Link VarA="PlcTask Inputs^P_Panel.diEStop" VarB="Channel 6^Input"/>
+				<Link VarA="PlcTask Inputs^P_Panel.diEnable" VarB="Channel 1^Input"/>
+				<Link VarA="PlcTask Inputs^P_Panel.diFanDown" VarB="Channel 3^Input"/>
+				<Link VarA="PlcTask Inputs^P_Panel.diFanUp" VarB="Channel 2^Input"/>
 			</OwnerB>
 			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 1 (EK1100)^Term 3 (EL2008)">
-				<Link VarA="PlcTask Outputs^MAIN.LIGHT" VarB="Channel 1^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doDamperClose" VarB="Channel 8^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doDamperOpen" VarB="Channel 7^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doLampAmber" VarB="Channel 5^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doLampBlue" VarB="Channel 3^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doLampBottomRed" VarB="Channel 6^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doLampGreen" VarB="Channel 4^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doLampTopRed" VarB="Channel 1^Output"/>
+				<Link VarA="PlcTask Outputs^P_Panel.doLampWhite" VarB="Channel 2^Output"/>
 			</OwnerB>
 			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 1 (EK1100)^Term 4 (EL7342)">
 				<Link VarA="PlcTask Inputs^P_FanTest.bStsError" VarB="DCM Status Channel 1^Status^Error"/>
