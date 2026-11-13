@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="P_Panel" Id="{b07705da-cd36-442c-9555-658a2efb01ed}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM P_Panel
@@ -67,6 +67,17 @@ VAR
     fbOffTimer      : TON;
     fbLampTestTimer : TON;
     fbBlinkTimer    : TON;
+	
+	    // Analog inputs, EL3002, ±10 V = ±32767
+    aiCh1 AT %I* : INT;   // Term 10 Ch1
+    aiCh2 AT %I* : INT;   // Term 10 Ch2
+    aiCh3 AT %I* : INT;   // Term 11 Ch1
+    aiCh4 AT %I* : INT;   // Term 11 Ch2
+	
+    // Analog outputs, EL4002, 0-10 V = 0-32767
+    aoCh1 AT %Q* : INT;   // Term 12 Ch1
+    aoCh2 AT %Q* : INT;   // Term 12 Ch2
+	
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -253,5 +264,29 @@ doDamperClose := bDamperCloseOut AND NOT bDamperOpenOut;
 ]]></ST>
       </Implementation>
     </Action>
+    <LineIds Name="P_Panel">
+      <LineId Id="3" Count="5" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="P_Panel.A1_Inputs">
+      <LineId Id="2" Count="12" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="P_Panel.A2_Initialize">
+      <LineId Id="2" Count="8" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="P_Panel.A3_Safety">
+      <LineId Id="2" Count="21" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="P_Panel.A4_Main">
+      <LineId Id="2" Count="86" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="P_Panel.A5_Outputs">
+      <LineId Id="2" Count="18" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
   </POU>
 </TcPlcObject>

@@ -27,6 +27,9 @@
     <Compile Include="POUs\P_FanTest.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\P_Loop.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\P_Panel.TcPOU">
       <SubType>Code</SubType>
     </Compile>

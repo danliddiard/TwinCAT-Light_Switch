@@ -84,11 +84,16 @@
 		</System>
 		<Plc>
 			<Project GUID="{32A162D7-6945-41A5-9369-A3CDDA81D06F}" Name="PLC1" PrjFilePath="PLC1\PLC1.plcproj" TmcFilePath="PLC1\PLC1.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{71521799-1F7B-C321-36CC-440ACB28E39C}">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{B5A91444-59EF-6EA6-873E-E5FE04B012D2}">
 					<Name>PLC1 Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="1">
 						<Name>PlcTask Inputs</Name>
+						<Var>
+							<Name>P_Panel.aiCh1</Name>
+							<Comment><![CDATA[ Term 10 Ch1]]></Comment>
+							<Type>INT</Type>
+						</Var>
 						<Var>
 							<Name>P_Panel.diEnable</Name>
 							<Comment><![CDATA[ Ch1  Selector switch, maintained]]></Comment>
@@ -118,6 +123,26 @@
 							<Name>P_Panel.diEStop</Name>
 							<Comment><![CDATA[ Ch6  Round red, software E-stop (NO contact)]]></Comment>
 							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.aiCh2</Name>
+							<Comment><![CDATA[ Term 10 Ch2]]></Comment>
+							<Type>INT</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.aiCh3</Name>
+							<Comment><![CDATA[ Term 11 Ch1]]></Comment>
+							<Type>INT</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.aiCh4</Name>
+							<Comment><![CDATA[ Term 11 Ch2]]></Comment>
+							<Type>INT</Type>
+						</Var>
+						<Var>
+							<Name>P_Loop.nAI1</Name>
+							<Comment><![CDATA[ Term 10 (EL3002) > AI Standard Channel 1 > Value]]></Comment>
+							<Type>INT</Type>
 						</Var>
 						<Var>
 							<Name>P_FanTest.bStsReadyToEnable</Name>
@@ -181,6 +206,16 @@
 							<Name>P_Panel.doDamperClose</Name>
 							<Comment><![CDATA[ Ch8  Trainer Damper Close +]]></Comment>
 							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.aoCh1</Name>
+							<Comment><![CDATA[ Term 12 Ch1]]></Comment>
+							<Type>INT</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.aoCh2</Name>
+							<Comment><![CDATA[ Term 12 Ch2]]></Comment>
+							<Type>INT</Type>
 						</Var>
 						<Var>
 							<Name>P_FanTest.bCtrlEnable</Name>
@@ -1357,6 +1392,9 @@ Bit1: Value bigger/equal Limit2]]></Comment>
 	<Mappings>
 		<MappingInfo Identifier="{00000000-2001-0850-0020-500810000403}" Id="#x02030010"/>
 		<OwnerA Name="TIPC^PLC1^PLC1 Instance">
+			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 6 (EK1100)^Term 10 (EL3002)">
+				<Link VarA="PlcTask Inputs^P_Loop.nAI1" VarB="AI Standard Channel 1^Value"/>
+			</OwnerB>
 			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 6 (EK1100)^Term 7 (EL1008)">
 				<Link VarA="PlcTask Inputs^P_Panel.diDamperClose" VarB="Channel 5^Input"/>
 				<Link VarA="PlcTask Inputs^P_Panel.diDamperOpen" VarB="Channel 4^Input"/>

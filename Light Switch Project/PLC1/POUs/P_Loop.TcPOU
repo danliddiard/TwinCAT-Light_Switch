@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="P_Loop" Id="{782d3935-dce7-430b-b03b-5fa34d8c7091}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_Loop
+// Ball height PID. PV = Prox through EL3002 Ch1. CV = fan % through P_FanTest.
+// Runs only when bAuto is TRUE and P_Panel is READY. Otherwise it tracks the fan (bumpless).
+// Call order in MAIN: P_Panel(); P_Loop(); P_FanTest();
+// In Auto, the panel Fan Up / Fan Down buttons move the setpoint instead of the fan.
+VAR_INPUT
+    // ---- Operator: write these online (later from the HMI) ----
+    bAuto       : BOOL;              // TRUE = PID drives the fan (needs panel READY)
+    rSP         : REAL := 6.0;       // Setpoint, inches
+    rKp         : REAL := 4.0;       // Gain, % fan per inch of error
+    rTi         : REAL := 4.0;       // Integral time, s (0 = no integral)
+    rTd         : REAL := 0.0;       // Derivative time, s (start at 0)
+    rOutMin     : REAL := 0.0;       // Fan low limit, % (raise to just under the lift-off %)
+    rOutMax     : REAL := 100.0;     // Fan high limit, %
+    bAntiWindup : BOOL := TRUE;      // FALSE only for the windup lab
+    bResetIAE   : BOOL;              // Set TRUE to zero the score
+END_VAR
+VAR
+    // ---- Settings ----
+    rSPMin      : REAL := 3.0;       // Lowest setpoint, in
+    rSPMax      : REAL := 9.0;       // Highest setpoint, in
+    rSPStep     : REAL := 0.5;       // Setpoint change per button press, in
+    rCalSlope   : REAL := 1.9;       // h = slope * V + offset (Oct 29 Prox readings)
+    rCalOffset  : REAL := 1.3;
+    rFilterS    : REAL := 0.2;       // PV filter time constant, s
+    rCycleS     : REAL := 0.01;      // PlcTask cycle, s
+
+    // ---- Readouts ----
+    rPVVolts    : REAL;              // Prox voltage
+    rPVRaw      : REAL;              // Height before filtering, in
+    rPV         : REAL;              // Height, filtered, in
+    rError      : REAL;              // SP - PV, in
+    rCV         : REAL;              // PID output, fan %
+    rP          : REAL;              // P part, %
+    rI          : REAL;              // I part, %
+    rD          : REAL;              // D part, %
+    rIAE        : REAL;              // Score: sum of |error| x time. Lower is better.
+    bActive     : BOOL;              // PID is driving the fan right now
+
+    // ---- EL3002 (link this one) ----
+    nAI1        AT %I* : INT;        // Term 10 (EL3002) > AI Standard Channel 1 > Value
+
+    // ---- Internal ----
+    rPVLast     : REAL;
+    rIStep      : REAL;
+    rCVTry      : REAL;
+    bWasActive  : BOOL;
+    fbSPUp      : R_TRIG;
+    fbSPDown    : R_TRIG;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 1. PV: raw counts -> volts -> inches, then a light filter
+rPVVolts := INT_TO_REAL(nAI1) * 10.0 / 32767.0;   // EL3002: 32767 = +10 V
+rPVRaw := rCalSlope * rPVVolts + rCalOffset;
+rPV := rPV + (rPVRaw - rPV) * rCycleS / MAX(rFilterS, rCycleS);
+
+// 2. The PID only runs in Auto while the panel is READY (state 2)
+bActive := bAuto AND (P_Panel.nState = 2);
+
+// 3. In Auto, Fan Up / Fan Down move the setpoint
+fbSPUp(CLK := bActive AND P_Panel.diFanUp);
+fbSPDown(CLK := bActive AND P_Panel.diFanDown);
+IF fbSPUp.Q THEN
+    rSP := rSP + rSPStep;
+END_IF
+IF fbSPDown.Q THEN
+    rSP := rSP - rSPStep;
+END_IF
+rSP := LIMIT(rSPMin, rSP, rSPMax);
+
+// 4. PID
+rError := rSP - rPV;
+IF bActive THEN
+    // First scan in Auto: start from the fan's current value (no bump)
+    IF NOT bWasActive THEN
+        rI := P_Panel.rFanPct - rKp * rError;
+        rPVLast := rPV;
+    END_IF
+
+    rP := rKp * rError;
+    rD := -rKp * rTd * (rPV - rPVLast) / rCycleS;   // D on PV, so SP changes don't kick
+
+    IF rTi > 0.0 THEN
+        rIStep := rKp * rError * rCycleS / rTi;
+        rCVTry := rP + rI + rIStep + rD;
+        // Anti-windup: stop integrating into a limit
+        IF NOT bAntiWindup
+           OR ((rCVTry < rOutMax OR rIStep < 0.0) AND (rCVTry > rOutMin OR rIStep > 0.0)) THEN
+            rI := rI + rIStep;
+        END_IF
+    END_IF
+
+    rCV := LIMIT(rOutMin, rP + rI + rD, rOutMax);
+    P_FanTest.rManualPct := rCV;              // Overrides the panel's fan value
+    rIAE := rIAE + ABS(rError) * rCycleS;
+ELSE
+    // Manual: follow the panel's fan value so the switch to Auto is smooth
+    rCV := P_Panel.rFanPct;
+    rP := 0.0;
+    rD := 0.0;
+    rI := rCV;
+END_IF
+
+rPVLast := rPV;
+bWasActive := bActive;
+
+IF bResetIAE THEN
+    rIAE := 0.0;
+    bResetIAE := FALSE;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>
