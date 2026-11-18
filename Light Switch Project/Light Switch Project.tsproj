@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<TcSmProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2012/07/TcSmProject" TcSmVersion="1.0" TcVersion="3.1.4024.79">
+<TcSmProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2012/07/TcSmProject" TcSmVersion="1.0" TcVersion="3.1.4024.79" TcVersionFixed="true">
 	<DataTypes>
 		<DataType>
 			<Name GUID="{18071995-0000-0000-0000-002000000001}" IecBaseType="true" BitType="true" AutoDeleteType="true" HideSubItems="true">ARRAY [0..0] OF BIT</Name>
@@ -84,16 +84,11 @@
 		</System>
 		<Plc>
 			<Project GUID="{32A162D7-6945-41A5-9369-A3CDDA81D06F}" Name="PLC1" PrjFilePath="PLC1\PLC1.plcproj" TmcFilePath="PLC1\PLC1.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{B5A91444-59EF-6EA6-873E-E5FE04B012D2}">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{25CF7CCA-E646-D925-E9B5-E5B984AA3A70}">
 					<Name>PLC1 Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="1">
 						<Name>PlcTask Inputs</Name>
-						<Var>
-							<Name>P_Panel.aiCh1</Name>
-							<Comment><![CDATA[ Term 10 Ch1]]></Comment>
-							<Type>INT</Type>
-						</Var>
 						<Var>
 							<Name>P_Panel.diEnable</Name>
 							<Comment><![CDATA[ Ch1  Selector switch, maintained]]></Comment>
@@ -123,6 +118,11 @@
 							<Name>P_Panel.diEStop</Name>
 							<Comment><![CDATA[ Ch6  Round red, software E-stop (NO contact)]]></Comment>
 							<Type>BOOL</Type>
+						</Var>
+						<Var>
+							<Name>P_Panel.aiCh1</Name>
+							<Comment><![CDATA[ Term 10 Ch1]]></Comment>
+							<Type>INT</Type>
 						</Var>
 						<Var>
 							<Name>P_Panel.aiCh2</Name>
