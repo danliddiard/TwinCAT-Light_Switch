@@ -18,6 +18,11 @@ VAR_INPUT
     bAntiWindup : BOOL := TRUE;      // FALSE only for the windup lab
     bResetIAE   : BOOL;              // Set TRUE to zero the score
 END_VAR
+
+VAR CONSTANT
+    CAL_LAST : INT := 3;   // last point number. Add a point later: bump this, extend both lists
+END_VAR
+
 VAR
     // ---- Settings ----
     rSPMin      : REAL := 3.0;       // Lowest setpoint, in
@@ -25,8 +30,10 @@ VAR
     rSPStep     : REAL := 0.5;       // Setpoint change per button press, in
     rCalSlope   : REAL := 1.9;       // h = slope * V + offset (Oct 29 Prox readings)
     rCalOffset  : REAL := 1.3;
-	aCalV       : ARRAY[0..3] OF REAL := [1.1, 1.9, 4.2, 5.877];  // Prox volts (Nov 13, ball center)
-	aCalIn      : ARRAY[0..3] OF REAL := [3.0, 6.0, 9.0, 12.0];   // Fatmax tape, inches
+	aCalV       : ARRAY[0..CAL_LAST] OF REAL := [1.1, 1.9, 4.2, 5.965];  // Prox volts (Nov 18th, ball center)
+    aCalIn      : ARRAY[0..CAL_LAST] OF REAL := [3.0, 6.0, 9.0, 12.0];   // Fatmax tape, inches
+    nCalSeg     : INT;    // which pair of points the reading falls between
+    i           : INT;
     rFilterS    : REAL := 0.2;       // PV filter time constant, s
     rCycleS     : REAL := 0.01;      // PlcTask cycle, s
 
@@ -57,7 +64,17 @@ END_VAR
     <Implementation>
       <ST><![CDATA[// 1. PV: raw counts -> volts -> inches, then a light filter
 rPVVolts := INT_TO_REAL(nAI1) * 10.0 / 32767.0;   // EL3002: 32767 = +10 V
-rPVRaw := rCalSlope * rPVVolts + rCalOffset;
+// Volts to inches: straight line between the two nearest calibration points
+nCalSeg := 0;
+FOR i := 1 TO CAL_LAST - 1 DO
+    IF rPVVolts > aCalV[i] THEN
+        nCalSeg := i;
+    END_IF
+END_FOR
+rPVRaw := aCalIn[nCalSeg]
+        + (rPVVolts - aCalV[nCalSeg])
+        * (aCalIn[nCalSeg + 1] - aCalIn[nCalSeg])
+        / (aCalV[nCalSeg + 1] - aCalV[nCalSeg]);
 rPV := rPV + (rPVRaw - rPV) * rCycleS / MAX(rFilterS, rCycleS);
 
 // 2. The PID only runs in Auto while the panel is READY (state 2)
@@ -116,9 +133,5 @@ IF bResetIAE THEN
 END_IF
 ]]></ST>
     </Implementation>
-    <LineIds Name="P_Loop">
-      <LineId Id="3" Count="58" />
-      <LineId Id="2" Count="0" />
-    </LineIds>
   </POU>
 </TcPlcObject>
