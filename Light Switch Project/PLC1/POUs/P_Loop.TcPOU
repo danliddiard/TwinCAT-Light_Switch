@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="P_Loop" Id="{782d3935-dce7-430b-b03b-5fa34d8c7091}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM P_Loop
@@ -25,6 +25,8 @@ VAR
     rSPStep     : REAL := 0.5;       // Setpoint change per button press, in
     rCalSlope   : REAL := 1.9;       // h = slope * V + offset (Oct 29 Prox readings)
     rCalOffset  : REAL := 1.3;
+	aCalV       : ARRAY[0..3] OF REAL := [1.1, 1.9, 4.2, 5.877];  // Prox volts (Nov 13, ball center)
+	aCalIn      : ARRAY[0..3] OF REAL := [3.0, 6.0, 9.0, 12.0];   // Fatmax tape, inches
     rFilterS    : REAL := 0.2;       // PV filter time constant, s
     rCycleS     : REAL := 0.01;      // PlcTask cycle, s
 
@@ -114,5 +116,9 @@ IF bResetIAE THEN
 END_IF
 ]]></ST>
     </Implementation>
+    <LineIds Name="P_Loop">
+      <LineId Id="3" Count="58" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
   </POU>
 </TcPlcObject>
