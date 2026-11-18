@@ -270,3 +270,4 @@ _Deployment/
 *.user
 .vs/
 *.bak
+_CompileInfo_Upload/
