@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="P_FanAO" Id="{184163fe-81a5-4a75-a903-1ce8cf514cfa}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_FanAO
+// Fan on the EL4002 analog output (true 0-10 V) instead of the EL7342 PWM filter.
+// Wiring (power off): EL4002 Output 1 -> trainer Analog + Fan Ctrl, EL4002 GND -> Analog - Fan Ctrl.
+// Take the 15 kohm / 1 uF filter leads off Fan Ctrl first. Fan Ctrl is 8.9 kohm; the EL4002 needs > 5 kohm.
+// Follows P_FanTest.rCmdPct, so the panel, the PID, the faults and the fan-fault logic all still apply.
+VAR_INPUT
+    bUseAO      : BOOL := FALSE;             // TRUE once the fan is wired to the EL4002
+    rMaxV       : REAL := 10.0;              // Volts at 100 %. Full 0-10 V range of the trainer's Fan Ctrl input
+END_VAR
+VAR
+    nAO1        AT %Q* : INT;                // Term 12 (EL4002) > AO Outputs Channel 1 > Analog output
+    rVolts      : REAL;                      // Readout: volts being sent
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[IF bUseAO THEN
+    rVolts := LIMIT(0.0, P_FanTest.rCmdPct, 100.0) / 100.0 * LIMIT(0.0, rMaxV, 10.0);
+ELSE
+    rVolts := 0.0;
+END_IF
+nAO1 := REAL_TO_INT(rVolts / 10.0 * 32767.0);   // EL4002: 32767 = 10 V
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

@@ -7,14 +7,16 @@ END_VAR
 ]]></Declaration>
     <Implementation>
       <ST><![CDATA[P_Panel();
+P_Hmi();
 P_Loop();
 P_FanTest();
+P_FanAO();
 ]]></ST>
     </Implementation>
     <LineIds Name="MAIN">
-      <LineId Id="14" Count="1" />
-      <LineId Id="12" Count="0" />
+      <LineId Id="19" Count="3" />
       <LineId Id="2" Count="0" />
+      <LineId Id="23" Count="0" />
     </LineIds>
   </POU>
 </TcPlcObject>

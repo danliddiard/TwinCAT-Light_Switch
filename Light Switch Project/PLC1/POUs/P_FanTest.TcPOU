@@ -127,9 +127,5 @@ ELSE
 END_IF
 ]]></ST>
     </Implementation>
-    <LineIds Name="P_FanTest">
-      <LineId Id="3" Count="68" />
-      <LineId Id="2" Count="0" />
-    </LineIds>
   </POU>
 </TcPlcObject>

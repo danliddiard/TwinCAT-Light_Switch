@@ -4,7 +4,8 @@
     <Declaration><![CDATA[PROGRAM P_Loop
 // Ball height PID. PV = Prox through EL3002 Ch1. CV = fan % through P_FanTest.
 // Runs only when bAuto is TRUE and P_Panel is READY. Otherwise it tracks the fan (bumpless).
-// Call order in MAIN: P_Panel(); P_Loop(); P_FanTest();
+// Call order in MAIN: P_Panel(); P_Hmi(); P_Loop(); P_FanTest(); P_FanAO();
+// nScenario injects one classic loop fault for teaching (Auto only). The PID doesn't know.
 // In Auto, the panel Fan Up / Fan Down buttons move the setpoint instead of the fan.
 VAR_INPUT
     // ---- Operator: write these online (later from the HMI) ----
@@ -17,6 +18,7 @@ VAR_INPUT
     rOutMax     : REAL := 100.0;     // Fan high limit, %
     bAntiWindup : BOOL := TRUE;      // FALSE only for the windup lab
     bResetIAE   : BOOL;              // Set TRUE to zero the score
+    nScenario   : INT;               // Teaching fault: 0 none, 1 dead time, 2 sticky fan, 3 noisy PV, 4 frozen PV, 5 wrong action, 6 weak fan
 END_VAR
 
 VAR CONSTANT
@@ -59,10 +61,35 @@ VAR
     bWasActive  : BOOL;
     fbSPUp      : R_TRIG;
     fbSPDown    : R_TRIG;
+
+    // ---- Fault injection (teaching) ----
+    nLastScenario : INT;
+    aDelay      : ARRAY[0..299] OF REAL;   // dead-time buffer, one slot per 10 ms scan
+    nDelaySteps : INT := 150;          // 150 x 10 ms = 1.5 s extra dead time (max 300)
+    nDelayIdx   : INT;
+    rStickBand  : REAL := 4.0;         // sticky fan: output moves only after 4 % of change
+    rCVHeld     : REAL;
+    nSeed       : UDINT := 12345;      // noise generator
+    rNoiseAmp   : REAL := 0.4;         // noisy PV: +/- 0.4 in before the filter
+    rPVHeld     : REAL;                // frozen PV value
+    rWeakFanMax : REAL := 55.0;        // weak fan: real output tops out here, the PID can't see it
+    rCVOut      : REAL;                // what actually goes to the fan
+    j           : INT;
 END_VAR
 ]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 1. PV: raw counts -> volts -> inches, then a light filter
+      <ST><![CDATA[// 0. Teaching faults: reset the injectors when the scenario changes
+IF nScenario <> nLastScenario THEN
+    FOR j := 0 TO 299 DO
+        aDelay[j] := rCV;
+    END_FOR
+    nDelayIdx := 0;
+    rCVHeld := rCV;
+    rPVHeld := rPV;
+    nLastScenario := nScenario;
+END_IF
+
+// 1. PV: raw counts -> volts -> inches, then a light filter
 rPVVolts := INT_TO_REAL(nAI1) * 10.0 / 32767.0;   // EL3002: 32767 = +10 V
 // Volts to inches: straight line between the two nearest calibration points
 nCalSeg := 0;
@@ -75,6 +102,14 @@ rPVRaw := aCalIn[nCalSeg]
         + (rPVVolts - aCalV[nCalSeg])
         * (aCalIn[nCalSeg + 1] - aCalIn[nCalSeg])
         / (aCalV[nCalSeg + 1] - aCalV[nCalSeg]);
+
+// 1b. Teaching faults on the measurement
+IF nScenario = 3 THEN
+    nSeed := nSeed * UDINT#1103515245 + UDINT#12345;   // wraps around on purpose
+    rPVRaw := rPVRaw + (UDINT_TO_REAL(nSeed MOD 1001) / 500.0 - 1.0) * rNoiseAmp;
+ELSIF nScenario = 4 THEN
+    rPVRaw := rPVHeld;
+END_IF
 rPV := rPV + (rPVRaw - rPV) * rCycleS / MAX(rFilterS, rCycleS);
 
 // 2. The PID only runs in Auto while the panel is READY (state 2)
@@ -93,6 +128,9 @@ rSP := LIMIT(rSPMin, rSP, rSPMax);
 
 // 4. PID
 rError := rSP - rPV;
+IF nScenario = 5 THEN
+    rError := -rError;   // wrong action: the loop pushes the wrong way
+END_IF
 IF bActive THEN
     // First scan in Auto: start from the fan's current value (no bump)
     IF NOT bWasActive THEN
@@ -114,11 +152,29 @@ IF bActive THEN
     END_IF
 
     rCV := LIMIT(rOutMin, rP + rI + rD, rOutMax);
-    P_FanTest.rManualPct := rCV;              // Overrides the panel's fan value
+    // Teaching faults on the output: what the fan really gets
+    rCVOut := rCV;
+    IF nScenario = 1 THEN                       // extra dead time
+        aDelay[nDelayIdx] := rCV;
+        nDelayIdx := nDelayIdx + 1;
+        IF nDelayIdx >= LIMIT(1, nDelaySteps, 300) THEN
+            nDelayIdx := 0;
+        END_IF
+        rCVOut := aDelay[nDelayIdx];
+    ELSIF nScenario = 2 THEN                    // sticky fan
+        IF ABS(rCV - rCVHeld) > rStickBand THEN
+            rCVHeld := rCV;
+        END_IF
+        rCVOut := rCVHeld;
+    ELSIF nScenario = 6 THEN                    // weak fan
+        rCVOut := MIN(rCV, rWeakFanMax);
+    END_IF
+    P_FanTest.rManualPct := rCVOut;           // Overrides the panel's fan value
     rIAE := rIAE + ABS(rError) * rCycleS;
 ELSE
     // Manual: follow the panel's fan value so the switch to Auto is smooth
     rCV := P_Panel.rFanPct;
+    rCVOut := rCV;
     rP := 0.0;
     rD := 0.0;
     rI := rCV;

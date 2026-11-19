@@ -1,0 +1,123 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="P_Hmi" Id="{c5a196f0-83cf-4324-867a-3ed5db03fbb1}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_Hmi
+// Helper for the PID trainer screens Visu_Main and Visu_Lessons.
+// Screen buttons write here; this program turns them into P_Loop settings.
+// Call order in MAIN: P_Panel(); P_Hmi(); P_Loop(); P_FanTest(); P_FanAO();
+VAR
+    // ---- Screen buttons (Tap = TRUE while pressed) ----
+    bSPUp        : BOOL;                     // SP + 0.5 in
+    bSPDown      : BOOL;                     // SP - 0.5 in
+    bStepTest    : BOOL;                     // SP jumps between 4 and 7 in
+    aLessonBtn   : ARRAY[1..6] OF BOOL;      // Lessons page, buttons 1 to 6
+    aFaultBtn    : ARRAY[0..6] OF BOOL;      // Instructor faults A to F = 1 to 6, 0 = clear
+
+    // ---- Shown on the screens ----
+    nLesson      : INT;                      // Last lesson loaded, 0 = none
+    rPVShow      : REAL;                     // Height clamped to the tube, in
+    nBallDY      : INT;                      // Ball graphic offset, pixels (negative = up)
+    nSPDY        : INT;                      // SP marker offset, pixels (negative = up)
+    rPShare      : REAL;                     // Share of the fan output from P, %
+    rIShare      : REAL;                     // Share from I, %
+    rDShare      : REAL;                     // Share from D, %
+    bFaultActive : BOOL;                     // A teaching fault is on (doesn't say which)
+
+    // ---- Settings ----
+    rTubePx      : REAL := 330.0;            // Tube graphic height on the screen, pixels
+    rTubeIn      : REAL := 14.0;             // Tube graphic height, inches
+
+    // ---- Internal ----
+    fbSPUp       : R_TRIG;
+    fbSPDown     : R_TRIG;
+    fbStep       : R_TRIG;
+    aLessonEdge  : ARRAY[1..6] OF R_TRIG;
+    aFaultEdge   : ARRAY[0..6] OF R_TRIG;
+    k            : INT;
+    rSum         : REAL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 1. Setpoint buttons, 0.5 in per press (P_Loop limits SP to 3 to 9 in)
+fbSPUp(CLK := bSPUp);
+fbSPDown(CLK := bSPDown);
+IF fbSPUp.Q THEN
+    P_Loop.rSP := P_Loop.rSP + 0.5;
+END_IF
+IF fbSPDown.Q THEN
+    P_Loop.rSP := P_Loop.rSP - 0.5;
+END_IF
+
+// 2. Step test: SP jumps between 4 and 7 in
+fbStep(CLK := bStepTest);
+IF fbStep.Q THEN
+    IF P_Loop.rSP < 5.5 THEN
+        P_Loop.rSP := 7.0;
+    ELSE
+        P_Loop.rSP := 4.0;
+    END_IF
+END_IF
+
+// 3. Lessons: load the settings that show one classic problem
+FOR k := 1 TO 6 DO
+    aLessonEdge[k](CLK := aLessonBtn[k]);
+    IF aLessonEdge[k].Q THEN
+        nLesson := k;
+        P_Loop.nScenario := 0;
+        P_Loop.bAntiWindup := TRUE;
+        P_Loop.rTd := 0.0;
+        CASE k OF
+        1:  // P only: offset
+            P_Loop.rKp := 4.0;
+            P_Loop.rTi := 0.0;
+        2:  // Too much gain
+            P_Loop.rKp := 15.0;
+            P_Loop.rTi := 0.0;
+        3:  // Slow and overshoots
+            P_Loop.rKp := 1.5;
+            P_Loop.rTi := 1.5;
+        4:  // Windup
+            P_Loop.rKp := 4.0;
+            P_Loop.rTi := 2.0;
+            P_Loop.bAntiWindup := FALSE;
+        5:  // Noisy derivative
+            P_Loop.rKp := 4.0;
+            P_Loop.rTi := 4.0;
+            P_Loop.rTd := 1.0;
+        6:  // Good start
+            P_Loop.rKp := 4.0;
+            P_Loop.rTi := 4.0;
+        END_CASE
+        P_Loop.bResetIAE := TRUE;
+    END_IF
+END_FOR
+
+// 4. Instructor faults: A to F = scenario 1 to 6, button 0 clears
+FOR k := 0 TO 6 DO
+    aFaultEdge[k](CLK := aFaultBtn[k]);
+    IF aFaultEdge[k].Q THEN
+        P_Loop.nScenario := k;
+    END_IF
+END_FOR
+bFaultActive := P_Loop.nScenario <> 0;
+
+// 5. Ball and SP marker positions for the tube graphic
+rPVShow := LIMIT(0.0, P_Loop.rPV, rTubeIn);
+nBallDY := -REAL_TO_INT(rPVShow / rTubeIn * rTubePx);
+nSPDY := -REAL_TO_INT(LIMIT(0.0, P_Loop.rSP, rTubeIn) / rTubeIn * rTubePx);
+
+// 6. Share of the fan output from P, I and D
+rSum := ABS(P_Loop.rP) + ABS(P_Loop.rI) + ABS(P_Loop.rD);
+IF rSum > 0.01 THEN
+    rPShare := ABS(P_Loop.rP) / rSum * 100.0;
+    rIShare := ABS(P_Loop.rI) / rSum * 100.0;
+    rDShare := ABS(P_Loop.rD) / rSum * 100.0;
+ELSE
+    rPShare := 0.0;
+    rIShare := 0.0;
+    rDShare := 0.0;
+END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

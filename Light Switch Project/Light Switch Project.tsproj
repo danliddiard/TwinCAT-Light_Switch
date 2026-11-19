@@ -84,7 +84,7 @@
 		</System>
 		<Plc>
 			<Project GUID="{32A162D7-6945-41A5-9369-A3CDDA81D06F}" Name="PLC1" PrjFilePath="PLC1\PLC1.plcproj" TmcFilePath="PLC1\PLC1.tmc" ReloadTmc="true" AmsPort="851" FileArchiveSettings="#x000e" SymbolicMapping="true">
-				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{25CF7CCA-E646-D925-E9B5-E5B984AA3A70}">
+				<Instance Id="#x08502000" TcSmClass="TComPlcObjDef" KeepUnrestoredLinks="2" TmcPath="PLC1\PLC1.tmc" TmcHash="{ED0F1EE9-F3AE-B1A3-9BDA-F8563A223E41}">
 					<Name>PLC1 Instance</Name>
 					<CLSID ClassFactory="TcPlc30">{08500001-0000-0000-F000-000000000064}</CLSID>
 					<Vars VarGrpType="1">
@@ -230,6 +230,11 @@
 						<Var>
 							<Name>P_FanTest.nVelocity</Name>
 							<Comment><![CDATA[ DCM Velocity Channel 1 > Velocity]]></Comment>
+							<Type>INT</Type>
+						</Var>
+						<Var>
+							<Name>P_FanAO.nAO1</Name>
+							<Comment><![CDATA[ Term 12 (EL4002) > AO Outputs Channel 1 > Analog output]]></Comment>
 							<Type>INT</Type>
 						</Var>
 					</Vars>
@@ -1394,6 +1399,9 @@ Bit1: Value bigger/equal Limit2]]></Comment>
 		<OwnerA Name="TIPC^PLC1^PLC1 Instance">
 			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 6 (EK1100)^Term 10 (EL3002)">
 				<Link VarA="PlcTask Inputs^P_Loop.nAI1" VarB="AI Standard Channel 1^Value"/>
+			</OwnerB>
+			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 6 (EK1100)^Term 12 (EL4002)">
+				<Link VarA="PlcTask Outputs^P_FanAO.nAO1" VarB="AO Outputs Channel 1^Analog output"/>
 			</OwnerB>
 			<OwnerB Name="TIID^Device 1 (EtherCAT)^Term 6 (EK1100)^Term 7 (EL1008)">
 				<Link VarA="PlcTask Inputs^P_Panel.diDamperClose" VarB="Channel 5^Input"/>
