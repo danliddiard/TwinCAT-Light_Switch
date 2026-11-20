@@ -132,7 +132,7 @@ ELSIF NOT diEnable THEN
 END_IF
 
 // EL7342 error. Turning Enable off sends a reset to the terminal.
-bFanFault := P_FanTest.bStsError;
+bFanFault := P_FanTest.bStsError AND NOT P_FanAO.bUseAO;   // EL7342 only matters when it runs the fan
 IF bFanFault AND NOT diEnable THEN
     P_FanTest.bReset := TRUE;
 END_IF

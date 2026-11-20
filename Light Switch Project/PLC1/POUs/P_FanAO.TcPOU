@@ -5,9 +5,11 @@
 // Fan on the EL4002 analog output (true 0-10 V) instead of the EL7342 PWM filter.
 // Wiring (power off): EL4002 Output 1 -> trainer Analog + Fan Ctrl, EL4002 GND -> Analog - Fan Ctrl.
 // Take the 15 kohm / 1 uF filter leads off Fan Ctrl first. Fan Ctrl is 8.9 kohm; the EL4002 needs > 5 kohm.
-// Follows P_FanTest.rCmdPct, so the panel, the PID, the faults and the fan-fault logic all still apply.
+// Follows P_FanTest.rCmdPct, so the panel, the PID and the teaching faults all still apply.
+// Nov 20 2026: fan moved to the EL4002. bUseAO = TRUE parks the EL7342 (P_FanTest) and
+// stops its error from faulting the panel (P_Panel). Rollback: bUseAO := FALSE and put the filter back.
 VAR_INPUT
-    bUseAO      : BOOL := FALSE;             // TRUE once the fan is wired to the EL4002
+    bUseAO      : BOOL := TRUE;              // TRUE = fan on EL4002 Ch1. FALSE = old EL7342 PWM filter path
     rMaxV       : REAL := 10.0;              // Volts at 100 %. Full 0-10 V range of the trainer's Fan Ctrl input
 END_VAR
 VAR

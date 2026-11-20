@@ -26,12 +26,44 @@ VAR
     // ---- Trend: Histogram elements draw these, oldest at [0], newest at [149] ----
     aTrendPV     : ARRAY[0..149] OF REAL;    // Ball height, in (same clamp as the ball graphic)
     aTrendSP     : ARRAY[0..149] OF REAL;    // Setpoint, in
-    aTrendCV     : ARRAY[0..149] OF REAL;    // Fan output, %
+    aTrendCV     : ARRAY[0..149] OF REAL;    // Fan output, %, averaged over each 0.2 s sample
+
+    // ---- Version 2: flat P / I / D bars (Relative movement > Movement top-left > Y) ----
+    nPBarDY      : INT;                      // Pixels the bar's top edge moves down. 0 = full bar, rBarPx = empty
+    nIBarDY      : INT;
+    nDBarDY      : INT;
+    dwPColor     : DWORD;                    // Bar fill (Color variables > Fill color). Muted orange, brighter as it rises
+    dwIColor     : DWORD;
+    dwDColor     : DWORD;
+
+    // ---- Version 2: alarm banner across the top ----
+    bFlash       : BOOL;                     // Slow flash clock, 0.6 s on / 0.6 s off
+    bBanner      : BOOL;                     // Show the banner (element Invisible = NOT P_Hmi.bBanner)
+    sBanner      : STRING(48);               // Banner text (element text '%s', text variable P_Hmi.sBanner)
+    dwBannerFill : DWORD;                    // Banner fill, flashes bright / dark red so the text stays readable
+
+    // ---- Version 2: polyline trend (Absolute movement > Dynamic points) ----
+    aPtsPV       : ARRAY[0..149] OF VisuElems.VisuStructPoint;   // PV line, screen pixels
+    aPtsSP       : ARRAY[0..149] OF VisuElems.VisuStructPoint;   // SP step line
+    aPtsCV       : ARRAY[0..149] OF VisuElems.VisuStructPoint;   // Fan % line, in its own strip under the PV card
+    aPtsFill     : ARRAY[0..151] OF VisuElems.VisuStructPoint;   // Polygon under the PV line (PV points + 2 bottom corners)
+    nTrendPts    : INT := 150;               // Number of points for aPtsPV / aPtsSP / aPtsCV
+    nFillPts     : INT := 152;               // Number of points for aPtsFill
 
     // ---- Settings ----
     rTubePx      : REAL := 330.0;            // Tube graphic height on the screen, pixels
     rTubeIn      : REAL := 14.0;             // Tube graphic height, inches
     tTrendSample : TIME := T#200MS;          // 150 points x 0.2 s = 30 s on the trend
+    rBarPx       : REAL := 200.0;            // Full P / I / D bar height, pixels
+    aBarColor    : ARRAY[0..3] OF DWORD := [16#FF6E461E, 16#FFA06223, 16#FFD2801E, 16#FFFF9F1C];  // 0-25, 25-50, 50-75, 75-100 %
+    nTrX0        : INT := 186;               // PV / SP plot area, left edge, screen px
+    nTrY0        : INT := 76;                // top edge
+    nTrW         : INT := 320;               // width (150 points across it)
+    nTrH         : INT := 230;               // height = 0 to rTubeIn inches (fixed axis, never autoscale)
+    nCvY0        : INT := 322;               // Fan % strip, top edge (same left edge and width)
+    nCvH         : INT := 80;                // Fan % strip height = 0 to 100 %
+    // If the lines show up shifted on the panel, the points are relative to the element:
+    // write nTrX0, nTrY0 and nCvY0 online to move them, then put the good values here.
 
     // ---- Internal ----
     fbSPUp       : R_TRIG;
@@ -42,6 +74,11 @@ VAR
     k            : INT;
     rSum         : REAL;
     fbTrendTimer : TON;
+    fbFlash      : TON;
+    rCVSum       : REAL;                     // Fan % added up every scan between trend samples
+    nCVCount     : INT;
+    rDX          : REAL;                     // Pixels between trend points
+    nBottom      : INT;
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -91,8 +128,8 @@ FOR k := 1 TO 6 DO
             P_Loop.rKp := 4.0;
             P_Loop.rTi := 4.0;
             P_Loop.rTd := 1.0;
-        6:  // Good start
-            P_Loop.rKp := 4.0;
+        6:  // Good start (matches the P_Loop defaults; update both after tuning)
+            P_Loop.rKp := 1.0;
             P_Loop.rTi := 4.0;
         END_CASE
         P_Loop.bResetIAE := TRUE;
@@ -128,6 +165,9 @@ END_IF
 // 7. Trend: every 0.2 s, move every point one place left and add the newest at the end.
 //    (A ring buffer would be faster, but the Histogram draws [0] to [149] in order,
 //    so the line would jump where the ring wraps.)
+//    Fan % is the average over the 0.2 s (display smoothing only; the PID never sees it).
+rCVSum := rCVSum + P_Loop.rCV;
+nCVCount := nCVCount + 1;
 fbTrendTimer(IN := NOT fbTrendTimer.Q, PT := tTrendSample);
 IF fbTrendTimer.Q THEN
     FOR k := 0 TO 148 DO
@@ -137,7 +177,58 @@ IF fbTrendTimer.Q THEN
     END_FOR
     aTrendPV[149] := rPVShow;
     aTrendSP[149] := P_Loop.rSP;
-    aTrendCV[149] := P_Loop.rCV;
+    aTrendCV[149] := rCVSum / INT_TO_REAL(MAX(nCVCount, 1));
+    rCVSum := 0.0;
+    nCVCount := 0;
+
+    // 7b. Version 2: same arrays turned into screen points. Newest on the right.
+    rDX := INT_TO_REAL(nTrW) / 149.0;
+    nBottom := nTrY0 + nTrH;
+    FOR k := 0 TO 149 DO
+        aPtsPV[k].iX := nTrX0 + REAL_TO_INT(INT_TO_REAL(k) * rDX);
+        aPtsPV[k].iY := nBottom - REAL_TO_INT(LIMIT(0.0, aTrendPV[k], rTubeIn) / rTubeIn * INT_TO_REAL(nTrH));
+        aPtsSP[k].iX := aPtsPV[k].iX;
+        aPtsSP[k].iY := nBottom - REAL_TO_INT(LIMIT(0.0, aTrendSP[k], rTubeIn) / rTubeIn * INT_TO_REAL(nTrH));
+        aPtsCV[k].iX := aPtsPV[k].iX;
+        aPtsCV[k].iY := nCvY0 + nCvH - REAL_TO_INT(LIMIT(0.0, aTrendCV[k], 100.0) / 100.0 * INT_TO_REAL(nCvH));
+        aPtsFill[k] := aPtsPV[k];
+    END_FOR
+    aPtsFill[150].iX := aPtsPV[149].iX;   // down to the bottom right corner
+    aPtsFill[150].iY := nBottom;
+    aPtsFill[151].iX := aPtsPV[0].iX;     // and back along the bottom (the polygon closes itself)
+    aPtsFill[151].iY := nBottom;
+END_IF
+
+// 8. Version 2 bars: height from the share, colour in 4 steps (0-25, 25-50, 50-75, 75-100 %).
+//    REAL_TO_INT(share / 25 - 0.5) gives 0, 1, 2, 3 (LIMIT keeps 100 % in step 3).
+nPBarDY := REAL_TO_INT((100.0 - LIMIT(0.0, rPShare, 100.0)) / 100.0 * rBarPx);
+nIBarDY := REAL_TO_INT((100.0 - LIMIT(0.0, rIShare, 100.0)) / 100.0 * rBarPx);
+nDBarDY := REAL_TO_INT((100.0 - LIMIT(0.0, rDShare, 100.0)) / 100.0 * rBarPx);
+dwPColor := aBarColor[LIMIT(0, REAL_TO_INT(rPShare / 25.0 - 0.5), 3)];
+dwIColor := aBarColor[LIMIT(0, REAL_TO_INT(rIShare / 25.0 - 0.5), 3)];
+dwDColor := aBarColor[LIMIT(0, REAL_TO_INT(rDShare / 25.0 - 0.5), 3)];
+
+// 9. Version 2 banner: worst problem wins. Flashes slowly between bright and dark red.
+fbFlash(IN := NOT fbFlash.Q, PT := T#600MS);
+IF fbFlash.Q THEN
+    bFlash := NOT bFlash;
+END_IF
+IF P_Panel.nState = 3 THEN
+    sBanner := 'E-STOP: release it, then cycle Enable';
+ELSIF P_Panel.nState = 4 THEN
+    sBanner := 'FAN DRIVE FAULT: cycle Enable to reset';
+ELSIF P_Loop.bSatAlarm THEN
+    sBanner := 'FAN AT LIMIT: ball not reaching setpoint';
+ELSIF bFaultActive THEN
+    sBanner := 'INSTRUCTOR FAULT ACTIVE';
+ELSE
+    sBanner := '';
+END_IF
+bBanner := sBanner <> '';
+IF bFlash THEN
+    dwBannerFill := 16#FFFF5A4F;
+ELSE
+    dwBannerFill := 16#FF7A2420;
 END_IF
 ]]></ST>
     </Implementation>

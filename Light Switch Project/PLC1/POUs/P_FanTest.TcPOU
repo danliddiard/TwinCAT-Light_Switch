@@ -6,6 +6,8 @@
 // Wiring: 1' -> 15 kohm -> Analog + Fan Ctrl, 5' -> Analog - Fan Ctrl,
 // 1 uF across Fan Ctrl (arrow end on -), 3' = +24 V via 1 A fuse, 7' = 0 V.
 // EL7342 Startup: 8022:01 = 1 (Velocity direct), 8020:03 = 24000.
+// Nov 20 2026: when P_FanAO.bUseAO is TRUE the fan runs from the EL4002. This program still
+// works out rCmdPct (P_FanAO sends it), but the EL7342 stays disabled at 0 and its error is ignored.
 VAR CONSTANT
     MODE_OFF      : INT := 0;
     MODE_MANUAL   : INT := 1;
@@ -34,7 +36,8 @@ VAR
     rExpectedV  : REAL;              // What the meter should read across Fan Ctrl
     nStep       : INT;               // Step test position, 0 to 4
     bStepsDone  : BOOL;
-    bFanActive  : BOOL;              // Enabled and the terminal reports Ready
+    bFanActive  : BOOL;              // Enabled and the terminal reports Ready (EL4002 path: just enabled)
+    bFanOn      : BOOL;              // An active mode and nothing blocking the fan
 
     // ---- EL7342 channel 1 (link each one) ----
     bStsReadyToEnable AT %I* : BOOL; // DCM Status Channel 1 > Status > Ready to enable
@@ -109,18 +112,26 @@ END_CASE
 // 4. Clamp: never negative (a negative value reverses the H-bridge), never over 100
 rCmdPct := LIMIT(0.0, rTargetPct, 100.0);
 
-// 5. Enable only in an active mode with no terminal error
-bCtrlEnable := (nMode <> MODE_OFF) AND NOT bStsError;
-bFanActive := bCtrlEnable AND bStsReady;
+// 5. Fan on only in an active mode. On the EL7342 path it also needs no terminal error.
+//    On the EL4002 path the EL7342 stays disabled and its status doesn't matter.
+bFanOn := (nMode <> MODE_OFF) AND (P_FanAO.bUseAO OR NOT bStsError);
+bCtrlEnable := bFanOn AND NOT P_FanAO.bUseAO;
+bFanActive := bFanOn AND (P_FanAO.bUseAO OR bStsReady);
 
-// 6. Command to the terminal: 0 to 100 % becomes 0 to 32767
-IF NOT bCtrlEnable THEN
+// 6. Command: 0 to 100 %. The EL7342 gets 0 to 32767 only when it is the fan path.
+IF NOT bFanOn THEN
     rCmdPct := 0.0;
 END_IF
-nVelocity := REAL_TO_INT(rCmdPct / 100.0 * VELOCITY_FULL);
+IF bCtrlEnable THEN
+    nVelocity := REAL_TO_INT(rCmdPct / 100.0 * VELOCITY_FULL);
+ELSE
+    nVelocity := 0;
+END_IF
 
 // 7. What the meter should read across Fan Ctrl + and -
-IF (rSeriesOhm + rLoadOhm) > 0.0 THEN
+IF P_FanAO.bUseAO THEN
+    rExpectedV := rCmdPct / 100.0 * LIMIT(0.0, P_FanAO.rMaxV, 10.0);
+ELSIF (rSeriesOhm + rLoadOhm) > 0.0 THEN
     rExpectedV := rCmdPct / 100.0 * rSupplyV * rLoadOhm / (rSeriesOhm + rLoadOhm);
 ELSE
     rExpectedV := 0.0;

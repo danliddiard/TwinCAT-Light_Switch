@@ -11,7 +11,7 @@ VAR_INPUT
     // ---- Operator: write these online (later from the HMI) ----
     bAuto       : BOOL;              // TRUE = PID drives the fan (needs panel READY)
     rSP         : REAL := 6.0;       // Setpoint, inches
-    rKp         : REAL := 4.0;       // Gain, % fan per inch of error
+    rKp         : REAL := 1.0;       // Gain, % fan per inch of error (was 4; 4 oscillated 0 to 13 in with the pot up)
     rTi         : REAL := 4.0;       // Integral time, s (0 = no integral)
     rTd         : REAL := 0.0;       // Derivative time, s (start at 0)
     rOutMin     : REAL := 0.0;       // Fan low limit, % (raise to just under the lift-off %)
@@ -50,6 +50,9 @@ VAR
     rD          : REAL;              // D part, %
     rIAE        : REAL;              // Score: sum of |error| x time. Lower is better.
     bActive     : BOOL;              // PID is driving the fan right now
+    bSatAlarm   : BOOL;              // Fan stuck at a limit and the ball isn't getting to SP (bad PV, fan not following, pot down)
+    rSatS       : REAL := 8.0;       // Seconds at a limit before bSatAlarm
+    fbSat       : TON;
 
     // ---- EL3002 (link this one) ----
     nAI1        AT %I* : INT;        // Term 10 (EL3002) > AI Standard Channel 1 > Value
@@ -112,7 +115,12 @@ ELSIF nScenario = 4 THEN
 END_IF
 rPV := rPV + (rPVRaw - rPV) * rCycleS / MAX(rFilterS, rCycleS);
 
-// 2. The PID only runs in Auto while the panel is READY (state 2)
+// 2. The PID only runs in Auto while the panel is READY (state 2).
+//    Leaving READY (Enable off, E-stop, fault) drops Auto, so the fan never jumps
+//    to life on its own when someone turns the panel back on.
+IF P_Panel.nState <> 2 THEN
+    bAuto := FALSE;
+END_IF
 bActive := bAuto AND (P_Panel.nState = 2);
 
 // 3. In Auto, Fan Up / Fan Down move the setpoint
@@ -179,6 +187,13 @@ ELSE
     rD := 0.0;
     rI := rCV;
 END_IF
+
+// 5. Saturation alarm: fan pinned at max while the ball reads low, or at min while it reads high.
+//    Ball stuck at the top with Fan 100 % = the PV is lying. Fan at min = the fan isn't following.
+fbSat(IN := bActive AND (((rCV >= rOutMax - 0.5) AND (rError > 1.0))
+                      OR ((rCV <= rOutMin + 0.5) AND (rError < -1.0))),
+      PT := REAL_TO_TIME(rSatS * 1000.0));
+bSatAlarm := fbSat.Q;
 
 rPVLast := rPV;
 bWasActive := bActive;
