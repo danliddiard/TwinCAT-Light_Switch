@@ -23,9 +23,15 @@ VAR
     rDShare      : REAL;                     // Share from D, %
     bFaultActive : BOOL;                     // A teaching fault is on (doesn't say which)
 
+    // ---- Trend: Histogram elements draw these, oldest at [0], newest at [149] ----
+    aTrendPV     : ARRAY[0..149] OF REAL;    // Ball height, in (same clamp as the ball graphic)
+    aTrendSP     : ARRAY[0..149] OF REAL;    // Setpoint, in
+    aTrendCV     : ARRAY[0..149] OF REAL;    // Fan output, %
+
     // ---- Settings ----
     rTubePx      : REAL := 330.0;            // Tube graphic height on the screen, pixels
     rTubeIn      : REAL := 14.0;             // Tube graphic height, inches
+    tTrendSample : TIME := T#200MS;          // 150 points x 0.2 s = 30 s on the trend
 
     // ---- Internal ----
     fbSPUp       : R_TRIG;
@@ -35,6 +41,7 @@ VAR
     aFaultEdge   : ARRAY[0..6] OF R_TRIG;
     k            : INT;
     rSum         : REAL;
+    fbTrendTimer : TON;
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -116,6 +123,21 @@ ELSE
     rPShare := 0.0;
     rIShare := 0.0;
     rDShare := 0.0;
+END_IF
+
+// 7. Trend: every 0.2 s, move every point one place left and add the newest at the end.
+//    (A ring buffer would be faster, but the Histogram draws [0] to [149] in order,
+//    so the line would jump where the ring wraps.)
+fbTrendTimer(IN := NOT fbTrendTimer.Q, PT := tTrendSample);
+IF fbTrendTimer.Q THEN
+    FOR k := 0 TO 148 DO
+        aTrendPV[k] := aTrendPV[k + 1];
+        aTrendSP[k] := aTrendSP[k + 1];
+        aTrendCV[k] := aTrendCV[k + 1];
+    END_FOR
+    aTrendPV[149] := rPVShow;
+    aTrendSP[149] := P_Loop.rSP;
+    aTrendCV[149] := P_Loop.rCV;
 END_IF
 ]]></ST>
     </Implementation>
