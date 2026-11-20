@@ -177,12 +177,18 @@ ST_HOMING:
     END_IF
 
 ST_READY:
-    // Fan: one step per press
-    IF fbFanUpEdge.Q THEN
-        rFanPct := MIN(100.0, rFanPct + rFanStepPct);
-    END_IF
-    IF fbFanDownEdge.Q THEN
-        rFanPct := MAX(0.0, rFanPct - rFanStepPct);
+    IF P_Loop.bActive THEN
+        // Auto: the PID owns the fan. Follow its output so Auto -> Manual is bumpless,
+        // and ignore Fan Up / Down here (in Auto they move the setpoint in P_Loop)
+        rFanPct := LIMIT(0.0, P_Loop.rCV, 100.0);
+    ELSE
+        // Manual: one step per press
+        IF fbFanUpEdge.Q THEN
+            rFanPct := MIN(100.0, rFanPct + rFanStepPct);
+        END_IF
+        IF fbFanDownEdge.Q THEN
+            rFanPct := MAX(0.0, rFanPct - rFanStepPct);
+        END_IF
     END_IF
     // Damper: moves only while a button is held
     bCmdOpen := diDamperOpen AND NOT diDamperClose;
