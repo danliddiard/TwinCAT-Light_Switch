@@ -1,0 +1,257 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="P_Cal" Id="{394b309c-1351-48cb-b10c-b23dd83d5036}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM P_Cal
+// Calibration helper for the Prox (ball height) sensor.
+// The PID holds the ball near each target with a calm tuning, the PLC averages the RAW Prox volts,
+// and you read the tape. The old calibration only has to be close enough to hold the ball still;
+// the new table comes from the averaged volts and YOUR tape readings.
+//
+// Run it from XAE online (later from a Calibrate screen). Command bits clear themselves.
+//   1. Panel READY, pot full up, Auto off or on. Write bStart = TRUE.
+//   2. It turns Auto on with rCalKp / rCalTi and moves SP to each height in aTargetIn.
+//   3. When the ball has settled and tAvgMin of volts is averaged, bReady goes TRUE.
+//   4. Read the tape at the CENTRE of the ball (middle of the bounce). Prepare rTapeIn = that
+//      reading AND bStore = TRUE, then one Ctrl+F7 writes both.
+//   5. Repeat to the end (bSkip skips a height it can't hold). Check aCapV / aCapIn / aCapErrIn.
+//   6. bApply = TRUE loads the table into P_Loop (until the next download).
+//      Send the table to Claude so it becomes the code default.
+// bAbort stops at any time: your tuning goes back, the ball stays in Auto.
+// Call order in MAIN: P_Panel(); P_Hmi(); P_Cal(); P_Loop(); P_FanTest(); P_FanAO();
+VAR CONSTANT
+    CAP_MAX   : INT := 9;           // 10 points, same size as P_Loop's table
+    ST_IDLE   : INT := 0;
+    ST_MOVE   : INT := 1;           // going to the target, waiting for it to settle
+    ST_AVG    : INT := 2;           // averaging; bReady when long enough, then waits for bStore
+    ST_DONE   : INT := 3;
+END_VAR
+VAR_INPUT
+    bStart      : BOOL;             // Start a new calibration run (clears the old captures)
+    bStore      : BOOL;             // Store this point (needs bReady and rTapeIn)
+    bSkip       : BOOL;             // Skip this height
+    bAbort      : BOOL;             // Stop the run
+    bApply      : BOOL;             // Load the captured points into P_Loop
+    rTapeIn     : REAL;             // Tape reading at the ball centre, in. Cleared after each store
+END_VAR
+VAR
+    // ---- Settings ----
+    aTargetIn   : ARRAY[0..CAP_MAX] OF REAL := [3.0, 4.0, 5.0, 6.0, 7.5, 9.0, 10.5, 12.0, 13.0, 13.5];
+    nTargets    : INT := 10;        // how many of aTargetIn to use (lowest first)
+    rCalKp      : REAL := 0.5;      // Calm tuning used only during calibration
+    rCalTi      : REAL := 8.0;
+    rSettleBand : REAL := 0.4;      // Settled = |SP - PV| inside this band, in ...
+    tSettle     : TIME := T#4S;     // ... for this long
+    tSettleMax  : TIME := T#45S;    // Average anyway after this (point flagged in aCapNoSettle)
+    tAvgMin     : TIME := T#10S;    // Averaging time before bReady (keeps averaging until you store)
+
+    // ---- Readouts ----
+    nState      : INT;              // 0 Idle, 1 Moving, 2 Averaging, 3 Done
+    sMsg        : STRING(60) := 'Idle: write bStart = TRUE';
+    nTarget     : INT;              // Which target, 0 = first
+    rTargetIn   : REAL;             // Height being held now, in
+    bReady      : BOOL;             // Averaged long enough: read the tape and store
+    rAvgV       : REAL;             // Average raw Prox volts at this height
+    rAvgIn      : REAL;             // Average height by the OLD calibration, in
+    rSpreadIn   : REAL;             // Real bounce: highest minus lowest raw height, in
+    rAvgSecs    : REAL;             // Seconds averaged so far
+    nCap        : INT;              // Points captured
+    aCapV       : ARRAY[0..CAP_MAX] OF REAL;    // Captured volts
+    aCapIn      : ARRAY[0..CAP_MAX] OF REAL;    // Captured tape heights, in
+    aCapErrIn   : ARRAY[0..CAP_MAX] OF REAL;    // Tape minus old calibration, in (how far off the old table was)
+    aCapSpreadIn : ARRAY[0..CAP_MAX] OF REAL;   // Bounce at each point, in
+    aCapNoSettle : ARRAY[0..CAP_MAX] OF BOOL;   // TRUE = never settled inside the band; trust it less
+
+    // ---- Internal ----
+    fbSettle    : TON;
+    fbSettleMax : TON;
+    fbAvg       : TON;
+    rSumV       : LREAL;
+    rSumIn      : LREAL;
+    nCount      : DINT;
+    rMinIn      : REAL;
+    rMaxIn      : REAL;
+    bNoSettle   : BOOL;
+    bNext       : BOOL;
+    bStopRun    : BOOL;
+    bOk         : BOOL;
+    rOldKp      : REAL;             // Operator tuning, put back at the end
+    rOldTi      : REAL;
+    k           : INT;
+    m           : INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// 1. Stop conditions while a run is going
+bStopRun := FALSE;
+IF (nState = ST_MOVE) OR (nState = ST_AVG) THEN
+    IF bAbort THEN
+        sMsg := 'Aborted. Captured points kept';
+        bStopRun := TRUE;
+    ELSIF NOT P_Loop.bActive THEN
+        sMsg := 'Stopped: Auto went off or panel left READY';
+        bStopRun := TRUE;
+    ELSIF P_Loop.bSatAlarm THEN
+        sMsg := 'Stopped: fan stuck at a limit. Check Prox and pot';
+        bStopRun := TRUE;
+    END_IF
+END_IF
+IF bStopRun THEN
+    P_Loop.rKp := rOldKp;
+    P_Loop.rTi := rOldTi;
+    bReady := FALSE;
+    nState := ST_IDLE;
+END_IF
+
+// 2. Start a run
+IF bStart AND ((nState = ST_IDLE) OR (nState = ST_DONE)) THEN
+    IF P_Panel.nState <> 2 THEN
+        sMsg := 'Panel must be READY first';
+    ELSE
+        rOldKp := P_Loop.rKp;
+        rOldTi := P_Loop.rTi;
+        P_Loop.rKp := rCalKp;
+        P_Loop.rTi := rCalTi;
+        P_Loop.nScenario := 0;          // no teaching faults during calibration
+        P_Loop.bAuto := TRUE;
+        FOR k := 0 TO CAP_MAX DO
+            aCapV[k] := 0.0;
+            aCapIn[k] := 0.0;
+            aCapErrIn[k] := 0.0;
+            aCapSpreadIn[k] := 0.0;
+            aCapNoSettle[k] := FALSE;
+        END_FOR
+        nCap := 0;
+        nTarget := 0;
+        bReady := FALSE;
+        fbSettle(IN := FALSE);
+        fbSettleMax(IN := FALSE);
+        fbAvg(IN := FALSE);
+        nState := ST_MOVE;
+        sMsg := 'Moving to the first height';
+    END_IF
+END_IF
+
+// 3. While running, hold SP on the target (the panel buttons can't move it)
+IF (nState = ST_MOVE) OR (nState = ST_AVG) THEN
+    rTargetIn := aTargetIn[LIMIT(0, nTarget, CAP_MAX)];
+    P_Loop.rSP := rTargetIn;
+    IF bSkip THEN
+        bNext := TRUE;
+    END_IF
+END_IF
+
+CASE nState OF
+ST_MOVE:
+    fbSettle(IN := ABS(P_Loop.rPV - rTargetIn) < rSettleBand, PT := tSettle);
+    fbSettleMax(IN := TRUE, PT := tSettleMax);
+    IF (fbSettle.Q OR fbSettleMax.Q) AND NOT bNext THEN
+        bNoSettle := NOT fbSettle.Q;
+        fbSettle(IN := FALSE);
+        fbSettleMax(IN := FALSE);
+        rSumV := 0.0;
+        rSumIn := 0.0;
+        nCount := 0;
+        rMinIn := P_Loop.rPVRaw;
+        rMaxIn := P_Loop.rPVRaw;
+        fbAvg(IN := FALSE);
+        nState := ST_AVG;
+        sMsg := 'Settled. Averaging the Prox volts';
+        IF bNoSettle THEN
+            sMsg := 'Did not settle. Averaging anyway (flagged)';
+        END_IF
+    END_IF
+
+ST_AVG:
+    // Raw values every 10 ms scan: no PV filter, so this is what the sensor really does
+    rSumV := rSumV + REAL_TO_LREAL(P_Loop.rPVVolts);
+    rSumIn := rSumIn + REAL_TO_LREAL(P_Loop.rPVRaw);
+    nCount := nCount + 1;
+    rMinIn := MIN(rMinIn, P_Loop.rPVRaw);
+    rMaxIn := MAX(rMaxIn, P_Loop.rPVRaw);
+    rAvgV := LREAL_TO_REAL(rSumV / DINT_TO_LREAL(nCount));
+    rAvgIn := LREAL_TO_REAL(rSumIn / DINT_TO_LREAL(nCount));
+    rSpreadIn := rMaxIn - rMinIn;
+    rAvgSecs := DINT_TO_REAL(nCount) * P_Loop.rCycleS;
+    fbAvg(IN := TRUE, PT := tAvgMin);
+    IF fbAvg.Q AND NOT bReady THEN
+        bReady := TRUE;
+        sMsg := 'Ready: read the tape, write rTapeIn and bStore';
+    END_IF
+    IF bStore THEN
+        IF NOT bReady THEN
+            sMsg := 'Not ready yet: wait for bReady';
+        ELSIF rTapeIn <= 0.0 THEN
+            sMsg := 'Write rTapeIn (tape height) with bStore';
+        ELSIF nCap > CAP_MAX THEN
+            sMsg := 'Table full';
+        ELSE
+            aCapV[nCap] := rAvgV;
+            aCapIn[nCap] := rTapeIn;
+            aCapErrIn[nCap] := rTapeIn - rAvgIn;
+            aCapSpreadIn[nCap] := rSpreadIn;
+            aCapNoSettle[nCap] := bNoSettle;
+            nCap := nCap + 1;
+            rTapeIn := 0.0;             // so the next point can't reuse an old reading
+            bNext := TRUE;
+        END_IF
+    END_IF
+END_CASE
+
+// 4. Next height, or finished
+IF bNext AND ((nState = ST_MOVE) OR (nState = ST_AVG)) THEN
+    bReady := FALSE;
+    fbSettle(IN := FALSE);
+    fbSettleMax(IN := FALSE);
+    fbAvg(IN := FALSE);
+    nTarget := nTarget + 1;
+    IF (nTarget >= MIN(nTargets, CAP_MAX + 1)) OR (nCap > CAP_MAX) THEN
+        P_Loop.rKp := rOldKp;
+        P_Loop.rTi := rOldTi;
+        P_Loop.rSP := 6.0;              // park the ball mid-tube
+        nState := ST_DONE;
+        sMsg := 'Done: check aCapV / aCapIn, then bApply';
+    ELSE
+        nState := ST_MOVE;
+        sMsg := 'Moving to the next height';
+    END_IF
+END_IF
+bNext := FALSE;
+
+// 5. Apply: volts and inches must both rise point to point, or the sensor folds back somewhere
+IF bApply THEN
+    IF (nState = ST_MOVE) OR (nState = ST_AVG) THEN
+        sMsg := 'Finish or abort the run first';
+    ELSIF nCap < 2 THEN
+        sMsg := 'Need at least 2 points';
+    ELSE
+        bOk := TRUE;
+        m := 0;
+        FOR k := 1 TO nCap - 1 DO
+            IF bOk AND ((aCapV[k] <= aCapV[k - 1]) OR (aCapIn[k] <= aCapIn[k - 1])) THEN
+                bOk := FALSE;
+                m := k;
+            END_IF
+        END_FOR
+        IF bOk THEN
+            FOR k := 0 TO nCap - 1 DO
+                P_Loop.aCalV[k] := aCapV[k];
+                P_Loop.aCalIn[k] := aCapIn[k];
+            END_FOR
+            P_Loop.nCalLast := nCap - 1;
+            sMsg := 'Applied. Send the table to Claude for the code';
+        ELSE
+            sMsg := CONCAT('Not applied: point ', CONCAT(INT_TO_STRING(m), ' does not rise'));
+        END_IF
+    END_IF
+END_IF
+
+// 6. Command bits clear themselves
+bStart := FALSE;
+bStore := FALSE;
+bSkip := FALSE;
+bAbort := FALSE;
+bApply := FALSE;
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

@@ -4,7 +4,7 @@
     <Declaration><![CDATA[PROGRAM P_Hmi
 // Helper for the PID trainer screens Visu_Main and Visu_Lessons.
 // Screen buttons write here; this program turns them into P_Loop settings.
-// Call order in MAIN: P_Panel(); P_Hmi(); P_Loop(); P_FanTest(); P_FanAO();
+// Call order in MAIN: P_Panel(); P_Hmi(); P_Cal(); P_Loop(); P_FanTest(); P_FanAO();
 VAR
     // ---- Screen buttons (Tap = TRUE while pressed) ----
     bSPUp        : BOOL;                     // SP + 0.5 in
@@ -73,6 +73,7 @@ VAR
     aFaultEdge   : ARRAY[0..6] OF R_TRIG;
     k            : INT;
     rSum         : REAL;
+    rIUse        : REAL;                     // I part counted in the bars (0 when Ti = 0)
     fbTrendTimer : TON;
     fbFlash      : TON;
     rCVSum       : REAL;                     // Fan % added up every scan between trend samples
@@ -82,7 +83,7 @@ VAR
 END_VAR
 ]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// 1. Setpoint buttons, 0.5 in per press (P_Loop limits SP to 3 to 9 in)
+      <ST><![CDATA[// 1. Setpoint buttons, 0.5 in per press (P_Loop limits SP to 3 to 13.5 in)
 fbSPUp(CLK := bSPUp);
 fbSPDown(CLK := bSPDown);
 IF fbSPUp.Q THEN
@@ -150,11 +151,17 @@ rPVShow := LIMIT(0.0, P_Loop.rPV, rTubeIn);
 nBallDY := -REAL_TO_INT(rPVShow / rTubeIn * rTubePx);
 nSPDY := -REAL_TO_INT(LIMIT(0.0, P_Loop.rSP, rTubeIn) / rTubeIn * rTubePx);
 
-// 6. Share of the fan output from P, I and D
-rSum := ABS(P_Loop.rP) + ABS(P_Loop.rI) + ABS(P_Loop.rD);
+// 6. Share of the fan output from P, I and D.
+//    With Ti = 0 the I part is only the fixed bias, so the I bar shows 0 (integral is off).
+IF P_Loop.rTi > 0.0 THEN
+    rIUse := ABS(P_Loop.rI);
+ELSE
+    rIUse := 0.0;
+END_IF
+rSum := ABS(P_Loop.rP) + rIUse + ABS(P_Loop.rD);
 IF rSum > 0.01 THEN
     rPShare := ABS(P_Loop.rP) / rSum * 100.0;
-    rIShare := ABS(P_Loop.rI) / rSum * 100.0;
+    rIShare := rIUse / rSum * 100.0;
     rDShare := ABS(P_Loop.rD) / rSum * 100.0;
 ELSE
     rPShare := 0.0;

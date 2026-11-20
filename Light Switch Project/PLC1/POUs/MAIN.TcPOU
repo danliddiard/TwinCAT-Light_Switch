@@ -8,6 +8,7 @@ END_VAR
     <Implementation>
       <ST><![CDATA[P_Panel();
 P_Hmi();
+P_Cal();
 P_Loop();
 P_FanTest();
 P_FanAO();

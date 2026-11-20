@@ -4,37 +4,45 @@
     <Declaration><![CDATA[PROGRAM P_Loop
 // Ball height PID. PV = Prox through EL3002 Ch1. CV = fan % through P_FanTest.
 // Runs only when bAuto is TRUE and P_Panel is READY. Otherwise it tracks the fan (bumpless).
-// Call order in MAIN: P_Panel(); P_Hmi(); P_Loop(); P_FanTest(); P_FanAO();
+// Call order in MAIN: P_Panel(); P_Hmi(); P_Cal(); P_Loop(); P_FanTest(); P_FanAO();
 // nScenario injects one classic loop fault for teaching (Auto only). The PID doesn't know.
 // In Auto, the panel Fan Up / Fan Down buttons move the setpoint instead of the fan.
+VAR CONSTANT
+    CAL_MAX : INT := 9;   // room for 10 calibration points
+END_VAR
+
 VAR_INPUT
     // ---- Operator: write these online (later from the HMI) ----
     bAuto       : BOOL;              // TRUE = PID drives the fan (needs panel READY)
     rSP         : REAL := 6.0;       // Setpoint, inches
     rKp         : REAL := 1.0;       // Gain, % fan per inch of error (was 4; 4 oscillated 0 to 13 in with the pot up)
-    rTi         : REAL := 4.0;       // Integral time, s (0 = no integral)
+    rTi         : REAL := 4.0;       // Integral time, s. 0 = no integral (P only, uses rBias). Smaller = STRONGER integral
     rTd         : REAL := 0.0;       // Derivative time, s (start at 0)
     rOutMin     : REAL := 0.0;       // Fan low limit, % (raise to just under the lift-off %)
     rOutMax     : REAL := 100.0;     // Fan high limit, %
     bAntiWindup : BOOL := TRUE;      // FALSE only for the windup lab
     bResetIAE   : BOOL;              // Set TRUE to zero the score
     nScenario   : INT;               // Teaching fault: 0 none, 1 dead time, 2 sticky fan, 3 noisy PV, 4 frozen PV, 5 wrong action, 6 weak fan
-END_VAR
+    rBias       : REAL := 12.0;      // P only (Ti = 0): the fan % the loop centres on ("manual reset"). Near the hover % (about 9 % at 3 in, Nov 20)
 
-VAR CONSTANT
-    CAL_LAST : INT := 3;   // last point number. Add a point later: bump this, extend both lists
+    // ---- Prox calibration: volts -> inches, straight lines between points ----
+    // P_Cal can load a new table online (lasts until the next download).
+    // To add points by hand: fill the next slots in both lists and raise nCalLast.
+    aCalV       : ARRAY[0..CAL_MAX] OF REAL := [1.1, 1.9, 4.2, 5.965, 6(0.0)];  // Prox volts (Nov 18th, ball center)
+    aCalIn      : ARRAY[0..CAL_MAX] OF REAL := [3.0, 6.0, 9.0, 12.0, 6(0.0)];   // Fatmax tape, inches
+    nCalLast    : INT := 3;          // number of the last point in use (3 = four points)
 END_VAR
 
 VAR
     // ---- Settings ----
     rSPMin      : REAL := 3.0;       // Lowest setpoint, in
-    rSPMax      : REAL := 9.0;       // Highest setpoint, in
+    rSPMax      : REAL := 13.5;      // Highest setpoint, in (was 9; above 12 needs the P_Cal points to be trusted)
     rSPStep     : REAL := 0.5;       // Setpoint change per button press, in
-    rCalSlope   : REAL := 1.9;       // h = slope * V + offset (Oct 29 Prox readings)
+    rTiMin      : REAL := 0.5;       // Any Ti between 0 and this is raised to this (a tiny Ti slams the fan)
+    rCalSlope   : REAL := 1.9;       // Not used. Old single line h = slope * V + offset (Oct 29)
     rCalOffset  : REAL := 1.3;
-	aCalV       : ARRAY[0..CAL_LAST] OF REAL := [1.1, 1.9, 4.2, 5.965];  // Prox volts (Nov 18th, ball center)
-    aCalIn      : ARRAY[0..CAL_LAST] OF REAL := [3.0, 6.0, 9.0, 12.0];   // Fatmax tape, inches
     nCalSeg     : INT;    // which pair of points the reading falls between
+    rCalSpan    : REAL;   // volts between those two points
     i           : INT;
     rFilterS    : REAL := 0.2;       // PV filter time constant, s
     rCycleS     : REAL := 0.01;      // PlcTask cycle, s
@@ -95,16 +103,21 @@ END_IF
 // 1. PV: raw counts -> volts -> inches, then a light filter
 rPVVolts := INT_TO_REAL(nAI1) * 10.0 / 32767.0;   // EL3002: 32767 = +10 V
 // Volts to inches: straight line between the two nearest calibration points
+// (below the first point or above the last one, the end lines are extended)
+nCalLast := LIMIT(1, nCalLast, CAL_MAX);
 nCalSeg := 0;
-FOR i := 1 TO CAL_LAST - 1 DO
+FOR i := 1 TO nCalLast - 1 DO
     IF rPVVolts > aCalV[i] THEN
         nCalSeg := i;
     END_IF
 END_FOR
-rPVRaw := aCalIn[nCalSeg]
-        + (rPVVolts - aCalV[nCalSeg])
-        * (aCalIn[nCalSeg + 1] - aCalIn[nCalSeg])
-        / (aCalV[nCalSeg + 1] - aCalV[nCalSeg]);
+rCalSpan := aCalV[nCalSeg + 1] - aCalV[nCalSeg];
+IF ABS(rCalSpan) > 0.001 THEN
+    rPVRaw := aCalIn[nCalSeg]
+            + (rPVVolts - aCalV[nCalSeg])
+            * (aCalIn[nCalSeg + 1] - aCalIn[nCalSeg])
+            / rCalSpan;
+END_IF
 
 // 1b. Teaching faults on the measurement
 IF nScenario = 3 THEN
@@ -135,6 +148,12 @@ END_IF
 rSP := LIMIT(rSPMin, rSP, rSPMax);
 
 // 4. PID
+// Ti guard: 0 means "no integral"; anything between 0 and rTiMin is a typo that would slam the fan
+IF rTi < 0.0 THEN
+    rTi := 0.0;
+ELSIF (rTi > 0.0) AND (rTi < rTiMin) THEN
+    rTi := rTiMin;
+END_IF
 rError := rSP - rPV;
 IF nScenario = 5 THEN
     rError := -rError;   // wrong action: the loop pushes the wrong way
@@ -157,6 +176,10 @@ IF bActive THEN
            OR ((rCVTry < rOutMax OR rIStep < 0.0) AND (rCVTry > rOutMin OR rIStep > 0.0)) THEN
             rI := rI + rIStep;
         END_IF
+    ELSE
+        // P only: the I part is a fixed bias ("manual reset"), so P-only shows the classic offset
+        // instead of freezing at whatever value it had when Auto came on
+        rI := rBias;
     END_IF
 
     rCV := LIMIT(rOutMin, rP + rI + rD, rOutMax);
